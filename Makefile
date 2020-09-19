@@ -92,6 +92,29 @@ CC= cc
 #CC=clang
 MAY_NEED_GCC= gcc
 
+#RISCV_GCC  = $(CROSS_COMPILE)gcc -mabi=lp64 -march=rv64ima -mcmodel=medany -fno-builtin-printf -I$(BP_TEST_DIR)/include
+#RISCV_LINK = -O2 -static -nostartfiles -Wl,--start-group -lgloss -lperch -lc -lg -lm -lgcc -Wl,--end-group -T riscv.ld -L$(BP_TEST_DIR)/lib
+MKLFS = dramfs_mklfs
+
+comma:= ,
+empty:=
+space:= $(empty) $(empty)
+
+ARGC = 2
+ARGV = $(ENTRY) $(ENTRY).c
+
+RISCV_GCC  = $(CROSS_COMPILE)gcc
+RISCV_GCC += -O2 -mabi=lp64 -march=rv64ima -mcmodel=medany -mstrict-align -static -nostartfiles -I$(BP_TEST_DIR)/include
+RISCV_GCC += -D__init_argc=$(ARGC) -D__init_argv=\"$(subst $(space),\"$(comma)\",$(strip $(ARGV)))\"
+RISCV_GCC += -DG=$G -DP=$P -DV=$P
+
+RISCV_LINK      = $(CROSS_COMPILE)gcc -t -T riscv.ld
+RISCV_LINK_OPTS = -nostartfiles -lperch -lm -lgloss -lc -lg -lgcc -L$(BP_TEST_DIR)/lib
+
+LFS_BLOCK_SIZE = 128
+LFS_BLOCK_COUNT = 64
+
+OBJECT_FILES = endoh1.o lfs.o crt.o args.o
 
 ##############################
 # Special flags for this entry
@@ -123,8 +146,20 @@ V=8
 all: ${ENTRY} ${DATA}
 	@${TRUE}
 
-${ENTRY}: ${ENTRY}.c
-	${CC} ${CFLAGS} -DG=$G -DP=$P -DV=$P $< -o $@ ${LIBS}
+lfs.c: ${ENTRY}.c
+	$(MKLFS) $(LFS_BLOCK_SIZE) $(LFS_BLOCK_COUNT) $< > $@
+
+%.o: %.S
+	$(RISCV_GCC) -c $< -o $@
+
+%.o: %.c
+	$(RISCV_GCC) -c $< -o $@
+
+endoh1.riscv: $(OBJECT_FILES)
+	$(RISCV_LINK) $(OBJECT_FILES) -L. -o $@ $(RISCV_LINK_OPTS)
+
+${ENTRY}: ${ENTRY}.c lfs.c args.c crt.S
+	$(RISCV_GCC) $(RISCV_LINK) -DG=$G -DP=$P -DV=$P $< lfs.c args.c crt.S -o $@
 
 # alternative executable
 #
@@ -150,7 +185,7 @@ data: ${DATA}
 everything: all alt
 
 clean:
-	${RM} -f ${ENTRY}.o ${ALT_OBJ}
+	${RM} -f *.o ${ALT_OBJ}
 
 clobber: clean
 	${RM} -f ${ENTRY} ${ALT_ENTRY}
